@@ -13,6 +13,13 @@ import java.util.Arrays;
 import java.util.List;
 import java.util.Locale;
 import java.util.Random;
+import java.nio.file.Files;
+import java.nio.file.Paths;
+import java.io.IOException;
+import java.util.HashSet;
+import java.util.Set;
+
+//pronto
 
 public class Main {
 
@@ -20,26 +27,14 @@ public class Main {
     private static final int MAX_ATTEMPTS = 6;
     private static final int WORD_LENGTH = 5;
 
-    private static final String[] BANK_OF_WORDS = {
-            "sagaz", "amago", "termo", "negro", "exito", "mexer", "nobre", "etica", "senso", "afeto",
-            "algoz", "fazer", "plena", "tenue", "assim", "sobre", "mutua", "poder", "secao", "vigor",
-            "porem", "sutil", "ideia", "cerne", "moral", "justo", "honra", "anexo", "muito", "lapso",
-            "razao", "icone", "etnia", "sonho", "amigo", "tempo", "dengo", "casal", "prado", "genro",
-            "posse", "corja", "prole", "boato", "avido", "louco", "mundo", "lugar", "coisa", "papel",
-            "carro", "porta", "livro", "chave", "jogar", "beijo", "calor", "noite", "tarde", "chuva",
-            "vento", "terra", "pedra", "areia", "bicho", "peixe", "tigre", "dente", "olhos", "perna",
-            "dedos", "braco", "unhas", "roupa", "bolsa", "tenis", "botao", "cinto", "lapis", "letra",
-            "frase", "texto", "linha", "festa", "danca", "canto", "ritmo", "filme", "video", "audio",
-            "sinal", "canal", "vazio", "cheio", "curto", "longo", "largo", "fundo", "claro", "fosco",
-            "lindo", "feliz", "bravo", "calmo", "sabio", "burro", "velho", "jovem", "azedo", "forte",
-            "fraco", "limpo", "justa", "ponto", "focar", "certo", "norte", "oeste", "leste", "prata",
-            "cobre", "ferro", "vidro", "gesso", "muros", "tetos", "verbo", "copia", "falsa", "praia",
-            "nuvem", "arroz", "carne", "prato", "garfo", "faca", "tampa", "bolso", "caixa", "corte"
-    };
-
-    private static final Game GAME = new Game();
+    private static final List<String> PALAVRAS_SECRETAS = new ArrayList<>();
+    private static final Set<String> DICIONARIO_VALIDO = new HashSet<>();
+    private static Game GAME;
 
     public static void main(String[] args) throws IOException {
+        carregarDicionario(); 
+      
+        GAME = new Game();
         HttpServer server = HttpServer.create(new InetSocketAddress(PORT), 0);
         server.createContext("/api/game", exchange -> {
             try {
@@ -67,6 +62,28 @@ public class Main {
         server.start();
 
         System.out.println("Termo API rodando em http://localhost:" + PORT + "/api/game");
+    }
+
+    private static void carregarDicionario() {
+        try {
+            List<String> linhas = Files.readAllLines(Paths.get("dicionario.txt"));
+            
+            for (String linha : linhas) {
+                String palavraLimpa = removerAcentos(linha).trim().toUpperCase(Locale.ROOT);
+                
+                if (palavraLimpa.length() == WORD_LENGTH) {
+                    DICIONARIO_VALIDO.add(palavraLimpa); 
+                    PALAVRAS_SECRETAS.add(palavraLimpa); 
+                }
+            }
+            System.out.println("Dicionario carregado! Total de palavras: " + PALAVRAS_SECRETAS.size());
+            
+        } catch (IOException e) {
+            System.out.println("Aviso: Arquivo dicionario.txt não encontrado. Usando palavra de emergência.");
+        
+            PALAVRAS_SECRETAS.add("TERMO");
+            DICIONARIO_VALIDO.add("TERMO");
+        }
     }
 
     private static void handleGame(HttpExchange exchange) throws IOException {
@@ -224,49 +241,55 @@ public class Main {
         }
 
         private synchronized void reset() {
-            secretWord = BANK_OF_WORDS[random.nextInt(BANK_OF_WORDS.length)].toUpperCase(Locale.ROOT);
+            secretWord = PALAVRAS_SECRETAS.get(random.nextInt(PALAVRAS_SECRETAS.size()));
+            
             guesses.clear();
             finished = false;
             won = false;
             message = "Digite uma palavra de 5 letras e pressione enviar.";
         }
-
         private synchronized GameResult submitGuess(String rawGuess) {
-            if (finished) {
-                return new GameResult(409, this, "A rodada terminou. Reinicie para jogar de novo.");
-            }
+    if (finished) {
+        return new GameResult(409, this, "A rodada terminou. Reinicie para jogar de novo.");
+    }
 
-            String guess = normalizeGuess(rawGuess);
+    String guess = normalizeGuess(rawGuess);
 
-            if (guess.length() != WORD_LENGTH) {
-                return new GameResult(400, this, "A palavra precisa ter exatamente 5 letras.");
-            }
 
-            if (!guess.chars().allMatch(Character::isLetter)) {
-                return new GameResult(400, this, "Use apenas letras na tentativa.");
-            }
+    if (guess.length() != WORD_LENGTH) {
+        return new GameResult(400, this, "A palavra precisa ter exatamente 5 letras.");
+    }
 
-            GuessEvaluation evaluation = evaluateGuess(guess);
-            guesses.add(evaluation);
 
-            if (guess.equals(secretWord)) {
-                finished = true;
-                won = true;
-                message = "Acertou na tentativa " + guesses.size() + ".";
-                return new GameResult(200, this, message);
-            }
+    if (!guess.chars().allMatch(Character::isLetter)) {
+        return new GameResult(400, this, "Use apenas letras na tentativa.");
+    }
 
-            if (guesses.size() >= MAX_ATTEMPTS) {
-                finished = true;
-                won = false;
-                message = "Fim de jogo. A palavra era " + secretWord + ".";
-                return new GameResult(200, this, message);
-            }
+    if (!DICIONARIO_VALIDO.contains(guess)) {
+        return new GameResult(400, this, "Essa palavra não existe no dicionário.");
+    }
 
-            int remaining = MAX_ATTEMPTS - guesses.size();
-            message = "Tentativa registrada. Restam " + remaining + " chances.";
-            return new GameResult(200, this, message);
-        }
+    GuessEvaluation evaluation = evaluateGuess(guess);
+    guesses.add(evaluation);
+
+    if (guess.equals(secretWord)) {
+        finished = true;
+        won = true;
+        message = "Acertou na tentativa " + guesses.size() + ".";
+        return new GameResult(200, this, message);
+    }
+
+    if (guesses.size() >= MAX_ATTEMPTS) {
+        finished = true;
+        won = false;
+        message = "Fim de jogo. A palavra era " + secretWord + ".";
+        return new GameResult(200, this, message);
+    }
+
+    int remaining = MAX_ATTEMPTS - guesses.size();
+    message = "Tentativa registrada. Restam " + remaining + " chances.";
+    return new GameResult(200, this, message);
+}
 
         private synchronized String toJson() {
             return toJsonWithMessage(message);
